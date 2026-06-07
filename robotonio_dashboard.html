@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ROBOTONIO — IoT Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/5.0.5/mqtt.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:       #0c1220;
+    --surface:  #131d30;
+    --surface2: #1a2540;
+    --border:   rgba(255,255,255,0.07);
+    --teal:     #00d4aa;
+    --teal-dim: rgba(0,212,170,0.12);
+    --blue:     #4a9eff;
+    --red:      #ff5e5e;
+    --orange:   #ffaa44;
+    --yellow:   #ffd044;
+    --text:     #e8edf5;
+    --muted:    #7a8aa0;
+    --mono:     'Space Mono', monospace;
+    --sans:     'DM Sans', sans-serif;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    min-height: 100vh;
+    padding: 0;
+  }
+
+  /* ── Header ── */
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1.2rem 2rem;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .logo-mark {
+    width: 36px; height: 36px;
+    background: var(--teal);
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--mono);
+    font-weight: 700;
+    font-size: 14px;
+    color: #0c1220;
+    letter-spacing: -1px;
+  }
+  .logo-text { font-size: 18px; font-weight: 600; letter-spacing: 0.5px; }
+  .logo-sub { font-size: 12px; color: var(--muted); margin-top: 1px; }
+
+  .status-pill {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 14px;
+    border-radius: 20px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    font-size: 13px;
+    font-family: var(--mono);
+  }
+  .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--muted);
+    transition: background 0.3s;
+  }
+  .dot.connected { background: var(--teal); animation: pulse 2s infinite; }
+  .dot.error     { background: var(--red); }
+  @keyframes pulse {
+    0%,100% { box-shadow: 0 0 0 0 rgba(0,212,170,0.4); }
+    50%      { box-shadow: 0 0 0 5px rgba(0,212,170,0); }
+  }
+
+  /* ── Layout ── */
+  main { max-width: 1100px; margin: 0 auto; padding: 2rem; }
+
+  .grid-top {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 16px;
+  }
+  @media (max-width: 700px) {
+    .grid-top { grid-template-columns: 1fr 1fr; }
+    .grid-top .card:last-child { grid-column: 1 / -1; }
+    main { padding: 1rem; }
+  }
+
+  /* ── Cards ── */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 1.5rem;
+  }
+  .card-label {
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 0.75rem;
+  }
+  .metric {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+  }
+  .metric-val {
+    font-family: var(--mono);
+    font-size: 52px;
+    font-weight: 700;
+    line-height: 1;
+    transition: color 0.5s;
+  }
+  .metric-unit {
+    font-family: var(--mono);
+    font-size: 20px;
+    color: var(--muted);
+  }
+  .metric-trend {
+    font-size: 12px;
+    margin-top: 6px;
+    color: var(--muted);
+    font-family: var(--mono);
+  }
+
+  /* Comfort card */
+  .comfort-badge {
+    display: inline-block;
+    padding: 6px 16px;
+    border-radius: 8px;
+    font-family: var(--mono);
+    font-size: 22px;
+    font-weight: 700;
+    margin-bottom: 8px;
+    transition: background 0.5s, color 0.5s;
+  }
+  .comfort-desc { font-size: 13px; color: var(--muted); }
+
+  /* Messages count */
+  .stat-row {
+    display: flex; gap: 16px; margin-top: 1rem;
+  }
+  .stat { font-size: 12px; color: var(--muted); font-family: var(--mono); }
+  .stat span { color: var(--text); font-weight: 700; }
+
+  /* ── Chart ── */
+  .chart-card { margin-bottom: 16px; }
+  .chart-wrap { position: relative; height: 200px; margin-top: 0.5rem; }
+
+  /* ── Log ── */
+  .log-card { margin-bottom: 16px; }
+  .log-list {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--muted);
+    max-height: 120px;
+    overflow-y: auto;
+  }
+  .log-entry { padding: 4px 0; border-bottom: 1px solid var(--border); }
+  .log-entry .ts { color: var(--teal); margin-right: 8px; }
+  .log-entry .pl { color: var(--text); }
+
+  /* ── Config ── */
+  .config-toggle {
+    width: 100%;
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: var(--muted);
+    font-family: var(--sans);
+    font-size: 13px;
+    padding: 10px 16px;
+    text-align: left;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    transition: border-color 0.2s;
+  }
+  .config-toggle:hover { border-color: var(--teal); color: var(--text); }
+  .config-panel {
+    display: none;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.25rem;
+    margin-top: 8px;
+  }
+  .config-panel.open { display: block; }
+  .config-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+  @media (max-width: 500px) { .config-grid { grid-template-columns: 1fr; } }
+  .config-field label {
+    display: block;
+    font-size: 11px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+  .config-field input {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 13px;
+    padding: 8px 10px;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  .config-field input:focus { border-color: var(--teal); }
+  .btn-connect {
+    background: var(--teal);
+    color: #0c1220;
+    border: none;
+    border-radius: 8px;
+    font-family: var(--sans);
+    font-weight: 600;
+    font-size: 14px;
+    padding: 10px 24px;
+    cursor: pointer;
+    transition: opacity 0.2s;
+  }
+  .btn-connect:hover { opacity: 0.85; }
+
+  footer {
+    text-align: center;
+    padding: 1.5rem 2rem;
+    font-size: 12px;
+    color: var(--muted);
+    border-top: 1px solid var(--border);
+    font-family: var(--mono);
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-mark">RB</div>
+    <div>
+      <div class="logo-text">ROBOTONIO</div>
+      <div class="logo-sub">IoT Weather Station</div>
+    </div>
+  </div>
+  <div class="status-pill">
+    <div class="dot" id="dot"></div>
+    <span id="status-text">Αποσυνδεδεμένο</span>
+  </div>
+</header>
+
+<main>
+
+  <div class="grid-top">
+    <!-- Temperature -->
+    <div class="card">
+      <div class="card-label">Θερμοκρασία</div>
+      <div class="metric">
+        <div class="metric-val" id="temp-val" style="color: var(--teal);">--.-</div>
+        <div class="metric-unit">°C</div>
+      </div>
+      <div class="metric-trend" id="temp-trend">&nbsp;</div>
+    </div>
+
+    <!-- Humidity -->
+    <div class="card">
+      <div class="card-label">Υγρασία</div>
+      <div class="metric">
+        <div class="metric-val" id="hum-val" style="color: var(--blue);">--.-</div>
+        <div class="metric-unit">%</div>
+      </div>
+      <div class="metric-trend" id="hum-trend">&nbsp;</div>
+    </div>
+
+    <!-- Comfort -->
+    <div class="card">
+      <div class="card-label">Comfort Index</div>
+      <div class="comfort-badge" id="comfort-badge" style="background:var(--surface2);color:var(--muted);">---</div>
+      <div class="comfort-desc" id="comfort-desc">Αναμένω δεδομένα...</div>
+      <div class="stat-row">
+        <div class="stat">Μηνύματα: <span id="msg-count">0</span></div>
+        <div class="stat">Τελευταίο: <span id="last-time">—</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Chart -->
+  <div class="card chart-card">
+    <div class="card-label">Ιστορικό (τελευταίες 30 μετρήσεις)</div>
+    <div class="chart-wrap">
+      <canvas id="myChart"></canvas>
+    </div>
+  </div>
+
+  <!-- AI Report -->
+  <div class="card" id="ai-card" style="margin-bottom:16px;border-left:3px solid var(--teal)">
+    <div class="card-label">🤖 AI Weather Report</div>
+    <div id="ai-report-text" style="font-size:14px;line-height:1.6;color:var(--muted);font-style:italic;margin-top:8px">Αναμένω AI report (κάθε 5 λεπτά)...</div>
+    <div id="ai-report-time" style="font-size:11px;color:var(--muted);margin-top:6px;font-family:var(--mono)"></div>
+  </div>
+
+  <!-- Log -->
+  <div class="card log-card">
+    <div class="card-label">Τελευταία Μηνύματα MQTT</div>
+    <div class="log-list" id="log-list">
+      <div class="log-entry"><span class="ts">—</span><span class="pl">Αναμένω σύνδεση...</span></div>
+    </div>
+  </div>
+
+  <!-- Config -->
+  <button class="config-toggle" onclick="toggleConfig()">
+    ⚙ Ρυθμίσεις Σύνδεσης
+    <span id="cfg-arrow">▼</span>
+  </button>
+  <div class="config-panel" id="config-panel">
+    <div class="config-grid">
+      <div class="config-field">
+        <label>MQTT Broker</label>
+        <input type="text" id="cfg-host" value="test.mosquitto.org">
+      </div>
+      <div class="config-field">
+        <label>Port (WS)</label>
+        <input type="text" id="cfg-port" value="8080">
+      </div>
+      <div class="config-field">
+        <label>Username</label>
+        <input type="text" id="cfg-user" value="">
+      </div>
+      <div class="config-field">
+        <label>Password</label>
+        <input type="password" id="cfg-pass" value="">
+      </div>
+      <div class="config-field">
+        <label>Topic</label>
+        <input type="text" id="cfg-topic" value="robotonio/giannis/weather">
+      </div>
+    </div>
+    <button class="btn-connect" onclick="connect()">Σύνδεση →</button>
+  </div>
+
+</main>
+
+<footer>ROBOTONIO IoT Sprint — MicroPython + Groq AI + MQTT | robotonio.gr</footer>
+
+<script>
+// ── State ────────────────────────────────────────────────────
+let client = null;
+let msgCount = 0;
+let tempHistory = [];
+let humHistory  = [];
+let labels      = [];
+const MAX_POINTS = 30;
+
+// ── Comfort logic (mirrors rgb.py) ─────────────────────────
+function comfortIndex(T, H) {
+  if (T < 18)             return { label: "KRYO",    desc: "Κρύο — ντύσου ζεστά!",        color: "#4a9eff", bg: "rgba(74,158,255,0.15)" };
+  if (T > 37)             return { label: "ΚΑΥΣΩΝΑΣ",desc: "Ακραία ζέστη — μείνε σπίτι!", color: "#ff5e5e", bg: "rgba(255,94,94,0.15)"  };
+  if (T >= 33 || H > 80) return { label: "ΑΠΟΠΝΙΚΤ",desc: "Αποπνικτικός καιρός",          color: "#ffaa44", bg: "rgba(255,170,68,0.15)" };
+  if (T >= 27 || H > 65) return { label: "ΖΕΣΤΟ",    desc: "Ζεστό — πρόσεχε την ενυδάτωση", color: "#ffd044", bg: "rgba(255,208,68,0.15)" };
+  return                         { label: "ΑΝΕΤΑ",   desc: "Άνετος καιρός!",               color: "#00d4aa", bg: "rgba(0,212,170,0.15)"  };
+}
+
+// ── Chart ────────────────────────────────────────────────────
+const ctx = document.getElementById('myChart').getContext('2d');
+const chart = new Chart(ctx, {
+  type: 'line',
+  data: {
+    labels: [],
+    datasets: [
+      {
+        label: 'Θερμοκρασία (°C)',
+        data: [],
+        borderColor: '#00d4aa',
+        backgroundColor: 'rgba(0,212,170,0.06)',
+        borderWidth: 2,
+        pointRadius: 3,
+        pointBackgroundColor: '#00d4aa',
+        tension: 0.4,
+        fill: true,
+        yAxisID: 'yT',
+      },
+      {
+        label: 'Υγρασία (%)',
+        data: [],
+        borderColor: '#4a9eff',
+        backgroundColor: 'rgba(74,158,255,0.06)',
+        borderWidth: 2,
+        pointRadius: 3,
+        pointBackgroundColor: '#4a9eff',
+        tension: 0.4,
+        fill: true,
+        yAxisID: 'yH',
+      }
+    ]
+  },
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: { duration: 400 },
+    interaction: { mode: 'index', intersect: false },
+    plugins: {
+      legend: {
+        labels: { color: '#7a8aa0', font: { family: 'Space Mono', size: 11 }, boxWidth: 12, padding: 16 }
+      }
+    },
+    scales: {
+      x: {
+        ticks: { color: '#7a8aa0', font: { family: 'Space Mono', size: 10 }, maxRotation: 0 },
+        grid:  { color: 'rgba(255,255,255,0.04)' }
+      },
+      yT: {
+        position: 'left',
+        ticks: { color: '#00d4aa', font: { family: 'Space Mono', size: 11 }, callback: v => v.toFixed(1) + '°' },
+        grid:  { color: 'rgba(255,255,255,0.04)' }
+      },
+      yH: {
+        position: 'right',
+        ticks: { color: '#4a9eff', font: { family: 'Space Mono', size: 11 }, callback: v => v.toFixed(0) + '%' },
+        grid:  { display: false }
+      }
+    }
+  }
+});
+
+// ── MQTT ─────────────────────────────────────────────────────
+function connect() {
+  if (client) { try { client.end(true); } catch(e){} }
+
+  const host  = document.getElementById('cfg-host').value.trim();
+  const port  = document.getElementById('cfg-port').value.trim();
+  const user  = document.getElementById('cfg-user').value.trim();
+  const pass  = document.getElementById('cfg-pass').value.trim();
+  const topic = document.getElementById('cfg-topic').value.trim();
+
+  setStatus('connecting');
+
+  // ws:// για test.mosquitto.org (port 8080), wss:// για HiveMQ (port 8884)
+  const protocol = port === '8080' ? 'ws' : 'wss';
+  const url = `${protocol}://${host}:${port}/mqtt`;
+
+  const opts = {
+    clientId: 'robotonio_dash_' + Math.random().toString(16).substr(2, 8),
+    keepalive: 60,
+    reconnectPeriod: 5000,
+    connectTimeout: 10000,
+  };
+  if (user) { opts.username = user; opts.password = pass; }
+
+  client = mqtt.connect(url, opts);
+
+  client.on('connect', () => {
+    setStatus('connected');
+    client.subscribe(topic);
+    // subscribe και στο AI report topic
+    const aiTopic = topic.replace('/weather', '/ai_report');
+    client.subscribe(aiTopic);
+    addLog('✓ Συνδέθηκε · subscribe: ' + topic, true);
+  });
+
+  client.on('message', (t, payload) => {
+    const txt = payload.toString();
+    if (t.toString().includes('ai_report')) {
+      // AI report — plain text
+      addLog('🤖 ' + txt, true);
+      showAiReport(txt);
+    } else {
+      try {
+        const data = JSON.parse(txt);
+        handleData(data);
+      } catch(e) {
+        addLog('Parse error: ' + txt);
+      }
+    }
+  });
+
+  client.on('error', (err) => {
+    setStatus('error');
+    addLog('✗ Σφάλμα: ' + err.message);
+  });
+
+  client.on('close', () => {
+    setStatus('disconnected');
+  });
+}
+
+function handleData(data) {
+  msgCount++;
+  const T = parseFloat(data.temp ?? data.temperature);
+  const H = parseFloat(data.hum  ?? data.humidity);
+  if (isNaN(T) || isNaN(H)) return;
+
+  // Update cards
+  const prevT = parseFloat(document.getElementById('temp-val').textContent);
+  const prevH = parseFloat(document.getElementById('hum-val').textContent);
+
+  document.getElementById('temp-val').textContent = T.toFixed(1);
+  document.getElementById('hum-val').textContent  = H.toFixed(1);
+
+  if (!isNaN(prevT)) {
+    const dt = T - prevT;
+    document.getElementById('temp-trend').textContent = (dt > 0 ? '▲ +' : dt < 0 ? '▼ ' : '→ ') + Math.abs(dt).toFixed(1) + '°C από τελ.';
+  }
+  if (!isNaN(prevH)) {
+    const dh = H - prevH;
+    document.getElementById('hum-trend').textContent = (dh > 0 ? '▲ +' : dh < 0 ? '▼ ' : '→ ') + Math.abs(dh).toFixed(1) + '% από τελ.';
+  }
+
+  // Comfort
+  const c = comfortIndex(T, H);
+  const badge = document.getElementById('comfort-badge');
+  badge.textContent = c.label;
+  badge.style.background = c.bg;
+  badge.style.color = c.color;
+  document.getElementById('comfort-desc').textContent = c.desc;
+
+  // Temp color
+  document.getElementById('temp-val').style.color = c.color;
+
+  // Stats
+  document.getElementById('msg-count').textContent = msgCount;
+  const now = new Date();
+  document.getElementById('last-time').textContent =
+    now.getHours().toString().padStart(2,'0') + ':' +
+    now.getMinutes().toString().padStart(2,'0') + ':' +
+    now.getSeconds().toString().padStart(2,'0');
+
+  // Chart
+  const timeLabel = now.getHours().toString().padStart(2,'0') + ':' +
+                    now.getMinutes().toString().padStart(2,'0') + ':' +
+                    now.getSeconds().toString().padStart(2,'0');
+  labels.push(timeLabel);
+  tempHistory.push(T);
+  humHistory.push(H);
+  if (labels.length > MAX_POINTS) {
+    labels.shift(); tempHistory.shift(); humHistory.shift();
+  }
+  chart.data.labels           = labels;
+  chart.data.datasets[0].data = tempHistory;
+  chart.data.datasets[1].data = humHistory;
+  chart.update();
+
+  // Log
+  const payload = `T=${T.toFixed(1)}°C  H=${H.toFixed(1)}%` + (data.id ? `  #${data.id}` : '');
+  addLog(payload);
+}
+
+function addLog(msg, system = false) {
+  const list = document.getElementById('log-list');
+  const now  = new Date();
+  const ts   = now.getHours().toString().padStart(2,'0') + ':' +
+               now.getMinutes().toString().padStart(2,'0') + ':' +
+               now.getSeconds().toString().padStart(2,'0');
+  const el = document.createElement('div');
+  el.className = 'log-entry';
+  el.innerHTML = `<span class="ts">${ts}</span><span class="pl" style="${system ? 'color:var(--teal)' : ''}">${msg}</span>`;
+  list.insertBefore(el, list.firstChild);
+  while (list.children.length > 8) list.removeChild(list.lastChild);
+}
+
+function setStatus(s) {
+  const dot  = document.getElementById('dot');
+  const text = document.getElementById('status-text');
+  dot.className = 'dot';
+  if (s === 'connected')    { dot.classList.add('connected'); text.textContent = 'Συνδεδεμένο'; }
+  else if (s === 'error')   { dot.classList.add('error');     text.textContent = 'Σφάλμα'; }
+  else if (s === 'connecting') { text.textContent = 'Σύνδεση...'; }
+  else                      { text.textContent = 'Αποσυνδεδεμένο'; }
+}
+
+function showAiReport(text) {
+  const el = document.getElementById('ai-report-text');
+  const ts = document.getElementById('ai-report-time');
+  el.textContent = text;
+  el.style.color = 'var(--text)';
+  const now = new Date();
+  ts.textContent = now.getHours().toString().padStart(2,'0') + ':' +
+                   now.getMinutes().toString().padStart(2,'0') + ':' +
+                   now.getSeconds().toString().padStart(2,'0');
+}
+
+function toggleConfig() {
+  const panel = document.getElementById('config-panel');
+  const arrow = document.getElementById('cfg-arrow');
+  panel.classList.toggle('open');
+  arrow.textContent = panel.classList.contains('open') ? '▲' : '▼';
+}
+
+// Auto-connect on load
+window.addEventListener('load', () => connect());
+</script>
+</body>
+</html>
