@@ -42,15 +42,15 @@
     --bg:         #eef1f7;
     --surface:    #ffffff;
     --surface2:   #f3f5fa;
-    --border:     rgba(15,30,60,0.10);
-    --teal:       #009e84;
-    --blue:       #2b7fff;
-    --red:        #e23b50;
-    --orange:     #cf7a1a;
-    --yellow:     #b88800;
+    --border:     rgba(15,30,60,0.12);
+    --teal:       #00806a;
+    --blue:       #1f6fe0;
+    --red:        #d12c43;
+    --orange:     #a85d0e;
+    --yellow:     #8f6a00;
     --text:       #16202e;
-    --muted:      #5a6a82;
-    --chart-grid: rgba(15,30,60,0.07);
+    --muted:      #54657f;
+    --chart-grid: rgba(15,30,60,0.08);
     --logo-ink:   #ffffff;
   }
 
@@ -68,24 +68,24 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
     padding: 1.2rem 2rem;
     border-bottom: 1px solid var(--border);
     background: var(--surface);
   }
-  .logo { display: flex; align-items: center; gap: 12px; }
-  .logo-mark {
-    width: 36px; height: 36px;
-    background: var(--teal);
-    border-radius: 8px;
-    display: flex; align-items: center; justify-content: center;
-    font-family: var(--mono);
-    font-weight: 700;
-    font-size: 14px;
-    color: var(--logo-ink);
-    letter-spacing: -1px;
+  .logo { display: flex; align-items: center; gap: 12px; min-width: 0; }
+  .logo-img { height: 40px; width: auto; max-width: 220px; display: block; object-fit: contain; }
+  .logo-sub {
+    font-size: 12px; color: var(--muted);
+    padding-left: 12px; border-left: 1px solid var(--border);
+    line-height: 1.2;
   }
-  .logo-text { font-size: 18px; font-weight: 600; letter-spacing: 0.5px; }
-  .logo-sub { font-size: 12px; color: var(--muted); margin-top: 1px; }
+  .sr-only {
+    position: absolute; width: 1px; height: 1px;
+    padding: 0; margin: -1px; overflow: hidden;
+    clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+  }
 
   .header-right { display: flex; align-items: center; gap: 12px; }
   .theme-toggle {
@@ -146,6 +146,18 @@
     .grid-2 { grid-template-columns: 1fr; }
     main { padding: 1rem; }
   }
+  @media (max-width: 520px) {
+    header { padding: 1rem 1.2rem; }
+    .logo-img { height: 32px; }
+    .logo-sub { display: none; }
+    .grid-top { grid-template-columns: 1fr; }
+    .grid-top .card:last-child { grid-column: auto; }
+    .metric-val { font-size: 46px; }
+    .sum-val { font-size: 17px; }
+    .sum-cell { padding: 8px 4px; }
+    .status-pill { font-size: 12px; padding: 5px 10px; }
+    .card { padding: 1.25rem; }
+  }
 
   /* ── Cards ── */
   .card {
@@ -197,6 +209,10 @@
   .comfort-badge[data-state] {
     color: var(--comfort);
     background: color-mix(in srgb, var(--comfort) 16%, transparent);
+  }
+  [data-theme="light"] .comfort-badge[data-state] {
+    color: #fff;
+    background: var(--comfort);
   }
   .comfort-desc { font-size: 13px; color: var(--muted); }
 
@@ -322,12 +338,10 @@
 <body>
 
 <header>
+  <h1 class="sr-only">Πίνακας ελέγχου — Σταθμός Καιρού IoT ROBOTONIO</h1>
   <div class="logo">
-    <div class="logo-mark"><img src="robotonio.png" alt="ROBOTONIO"></div>
-    <div>
-      <div class="logo-text">ROBOTONIO</div>
-      <div class="logo-sub">IoT Weather Station</div>
-    </div>
+    <img class="logo-img" src="robotonio.png" alt="ROBOTONIO">
+    <span class="logo-sub">IoT Weather Station</span>
   </div>
   <div class="header-right">
     <button class="theme-toggle" id="theme-toggle" onclick="toggleTheme()" aria-label="Εναλλαγή φωτεινού/σκοτεινού θέματος" title="Φωτεινό / Σκοτεινό">🌙</button>
@@ -414,7 +428,7 @@
   <div class="card chart-card">
     <div class="card-label" id="chart-label">Ιστορικό (τελευταίες 60 μετρήσεις · ~10 λεπτά)</div>
     <div class="chart-wrap">
-      <canvas id="myChart"></canvas>
+      <canvas id="myChart" role="img" aria-label="Γράφημα ιστορικού θερμοκρασίας και υγρασίας"></canvas>
     </div>
   </div>
 
@@ -441,23 +455,23 @@
   <div class="config-panel" id="config-panel">
     <div class="config-grid">
       <div class="config-field">
-        <label>MQTT Broker</label>
+        <label for="cfg-host">MQTT Broker</label>
         <input type="text" id="cfg-host" value="test.mosquitto.org">
       </div>
       <div class="config-field">
-        <label>Port (WS)</label>
+        <label for="cfg-port">Port (WS)</label>
         <input type="text" id="cfg-port" value="8081">
       </div>
       <div class="config-field">
-        <label>Username</label>
+        <label for="cfg-user">Username</label>
         <input type="text" id="cfg-user" value="">
       </div>
       <div class="config-field">
-        <label>Password</label>
+        <label for="cfg-pass">Password</label>
         <input type="password" id="cfg-pass" value="">
       </div>
       <div class="config-field">
-        <label>Topic</label>
+        <label for="cfg-topic">Topic</label>
         <input type="text" id="cfg-topic" value="robotonio/giannis/weather">
       </div>
     </div>
