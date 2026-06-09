@@ -1,0 +1,824 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ROBOTONIO — IoT Dashboard</title>
+<!-- Θέμα όσο το δυνατόν νωρίτερα, ώστε να μην «αναβοσβήνει» η σελίδα στο load -->
+<script>
+  try {
+    var t = localStorage.getItem('robotonio-theme') ||
+      (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+    document.documentElement.setAttribute('data-theme', t);
+  } catch (e) {}
+</script>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/5.0.5/mqtt.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  /* ── Dark theme (προεπιλογή) ── */
+  :root, [data-theme="dark"] {
+    --bg:         #0c1220;
+    --surface:    #131d30;
+    --surface2:   #1a2540;
+    --border:     rgba(255,255,255,0.07);
+    --teal:       #00d4aa;
+    --blue:       #4a9eff;
+    --red:        #ff5e5e;
+    --orange:     #ffaa44;
+    --yellow:     #ffd044;
+    --text:       #e8edf5;
+    --muted:      #7a8aa0;
+    --chart-grid: rgba(255,255,255,0.04);
+    --logo-ink:   #0c1220;
+    --mono:       'Space Mono', monospace;
+    --sans:       'DM Sans', sans-serif;
+  }
+
+  /* ── Light theme ── */
+  [data-theme="light"] {
+    --bg:         #eef1f7;
+    --surface:    #ffffff;
+    --surface2:   #f3f5fa;
+    --border:     rgba(15,30,60,0.10);
+    --teal:       #009e84;
+    --blue:       #2b7fff;
+    --red:        #e23b50;
+    --orange:     #cf7a1a;
+    --yellow:     #b88800;
+    --text:       #16202e;
+    --muted:      #5a6a82;
+    --chart-grid: rgba(15,30,60,0.07);
+    --logo-ink:   #ffffff;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    min-height: 100vh;
+    padding: 0;
+    transition: background 0.3s, color 0.3s;
+  }
+
+  /* ── Header ── */
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1.2rem 2rem;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .logo { display: flex; align-items: center; gap: 12px; }
+  .logo-mark {
+    width: 36px; height: 36px;
+    background: var(--teal);
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--mono);
+    font-weight: 700;
+    font-size: 14px;
+    color: var(--logo-ink);
+    letter-spacing: -1px;
+  }
+  .logo-text { font-size: 18px; font-weight: 600; letter-spacing: 0.5px; }
+  .logo-sub { font-size: 12px; color: var(--muted); margin-top: 1px; }
+
+  .header-right { display: flex; align-items: center; gap: 12px; }
+  .theme-toggle {
+    width: 38px; height: 38px;
+    border-radius: 10px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: border-color 0.2s, background 0.2s;
+  }
+  .theme-toggle:hover { border-color: var(--teal); }
+
+  .status-pill {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 14px;
+    border-radius: 20px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    font-size: 13px;
+    font-family: var(--mono);
+  }
+  .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--muted);
+    transition: background 0.3s;
+  }
+  .dot.connected { background: var(--teal); animation: pulse 2s infinite; }
+  .dot.stale     { background: var(--orange); }
+  .dot.error     { background: var(--red); }
+  @keyframes pulse {
+    0%,100% { box-shadow: 0 0 0 0 rgba(0,212,170,0.4); }
+    50%      { box-shadow: 0 0 0 5px rgba(0,212,170,0); }
+  }
+
+  /* ── Layout ── */
+  main { max-width: 1100px; margin: 0 auto; padding: 2rem; }
+
+  .grid-top {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 16px;
+  }
+  .grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 16px;
+  }
+  @media (max-width: 700px) {
+    .grid-top { grid-template-columns: 1fr 1fr; }
+    .grid-top .card:last-child { grid-column: 1 / -1; }
+    .grid-2 { grid-template-columns: 1fr; }
+    main { padding: 1rem; }
+  }
+
+  /* ── Cards ── */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 1.5rem;
+  }
+  .card-label {
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 0.75rem;
+  }
+  .metric { display: flex; align-items: baseline; gap: 6px; }
+  .metric-val {
+    font-family: var(--mono);
+    font-size: 52px;
+    font-weight: 700;
+    line-height: 1;
+    color: var(--teal);
+    transition: color 0.5s;
+  }
+  #hum-val { color: var(--blue); }
+  .metric-unit { font-family: var(--mono); font-size: 20px; color: var(--muted); }
+  .metric-trend { font-size: 12px; margin-top: 6px; color: var(--muted); font-family: var(--mono); }
+
+  /* ── Comfort state → χρώμα (λειτουργεί και στα δύο θέματα) ── */
+  [data-state="cold"]  { --comfort: var(--blue);   }
+  [data-state="comfy"] { --comfort: var(--teal);   }
+  [data-state="warm"]  { --comfort: var(--yellow); }
+  [data-state="muggy"] { --comfort: var(--orange); }
+  [data-state="heat"]  { --comfort: var(--red);    }
+  #temp-val[data-state] { color: var(--comfort); }
+
+  .comfort-badge {
+    display: inline-block;
+    padding: 6px 16px;
+    border-radius: 8px;
+    font-family: var(--mono);
+    font-size: 22px;
+    font-weight: 700;
+    margin-bottom: 8px;
+    transition: background 0.5s, color 0.5s;
+  }
+  .comfort-badge:not([data-state]) { background: var(--surface2); color: var(--muted); }
+  .comfort-badge[data-state] {
+    color: var(--comfort);
+    background: color-mix(in srgb, var(--comfort) 16%, transparent);
+  }
+  .comfort-desc { font-size: 13px; color: var(--muted); }
+
+  /* Stats */
+  .stat-row { display: flex; gap: 16px; margin-top: 1rem; flex-wrap: wrap; }
+  .stat { font-size: 12px; color: var(--muted); font-family: var(--mono); }
+  .stat span { color: var(--text); font-weight: 700; }
+
+  /* ── Servo gauge (digital twin του SG90) ── */
+  .servo-wrap { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  #servo-track  { stroke: var(--border); }
+  #servo-arc, #servo-needle { stroke: var(--comfort, var(--teal)); transition: stroke 0.5s; }
+  .servo-deg { font-family: var(--mono); font-size: 18px; font-weight: 700; color: var(--text); }
+  .servo-sub { font-size: 11px; color: var(--muted); }
+
+  /* ── Session summary ── */
+  .sum-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 4px; }
+  .sum-cell { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 10px 8px; text-align: center; }
+  .sum-key { font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); }
+  .sum-val { font-family: var(--mono); font-size: 20px; font-weight: 700; margin-top: 4px; }
+  .sum-val.t { color: var(--teal); }
+  .sum-val.h { color: var(--blue); }
+  .sum-row-label { font-size: 11px; color: var(--muted); font-family: var(--mono); margin: 12px 0 4px; }
+  .btn-ghost {
+    margin-top: 12px;
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--muted);
+    font-family: var(--sans);
+    font-size: 12px;
+    padding: 7px 14px;
+    cursor: pointer;
+    transition: border-color 0.2s, color 0.2s;
+  }
+  .btn-ghost:hover { border-color: var(--red); color: var(--text); }
+
+  /* ── Chart ── */
+  .chart-card { margin-bottom: 16px; }
+  .chart-wrap { position: relative; height: 200px; margin-top: 0.5rem; }
+
+  /* ── Log ── */
+  .log-card { margin-bottom: 16px; }
+  .log-list { font-family: var(--mono); font-size: 12px; color: var(--muted); max-height: 120px; overflow-y: auto; }
+  .log-entry { padding: 4px 0; border-bottom: 1px solid var(--border); }
+  .log-entry .ts { color: var(--teal); margin-right: 8px; }
+  .log-entry .pl { color: var(--text); }
+
+  /* ── Config ── */
+  .config-toggle {
+    width: 100%;
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: var(--muted);
+    font-family: var(--sans);
+    font-size: 13px;
+    padding: 10px 16px;
+    text-align: left;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    transition: border-color 0.2s;
+  }
+  .config-toggle:hover { border-color: var(--teal); color: var(--text); }
+  .config-panel {
+    display: none;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.25rem;
+    margin-top: 8px;
+  }
+  .config-panel.open { display: block; }
+  .config-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+  @media (max-width: 500px) { .config-grid { grid-template-columns: 1fr; } }
+  .config-field label {
+    display: block;
+    font-size: 11px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+  .config-field input {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 13px;
+    padding: 8px 10px;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  .config-field input:focus { border-color: var(--teal); }
+  .btn-connect {
+    background: var(--teal);
+    color: var(--logo-ink);
+    border: none;
+    border-radius: 8px;
+    font-family: var(--sans);
+    font-weight: 600;
+    font-size: 14px;
+    padding: 10px 24px;
+    cursor: pointer;
+    transition: opacity 0.2s;
+  }
+  .btn-connect:hover { opacity: 0.85; }
+
+  footer {
+    text-align: center;
+    padding: 1.5rem 2rem;
+    font-size: 12px;
+    color: var(--muted);
+    border-top: 1px solid var(--border);
+    font-family: var(--mono);
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-mark">RB</div>
+    <div>
+      <div class="logo-text">ROBOTONIO</div>
+      <div class="logo-sub">IoT Weather Station</div>
+    </div>
+  </div>
+  <div class="header-right">
+    <button class="theme-toggle" id="theme-toggle" onclick="toggleTheme()" aria-label="Εναλλαγή φωτεινού/σκοτεινού θέματος" title="Φωτεινό / Σκοτεινό">🌙</button>
+    <div class="status-pill">
+      <div class="dot" id="dot"></div>
+      <span id="status-text">Αποσυνδεδεμένο</span>
+    </div>
+  </div>
+</header>
+
+<main>
+
+  <div class="grid-top">
+    <!-- Temperature -->
+    <div class="card">
+      <div class="card-label">Θερμοκρασία</div>
+      <div class="metric">
+        <div class="metric-val" id="temp-val">--.-</div>
+        <div class="metric-unit">°C</div>
+      </div>
+      <div class="metric-trend" id="temp-trend">&nbsp;</div>
+    </div>
+
+    <!-- Humidity -->
+    <div class="card">
+      <div class="card-label">Υγρασία</div>
+      <div class="metric">
+        <div class="metric-val" id="hum-val">--.-</div>
+        <div class="metric-unit">%</div>
+      </div>
+      <div class="metric-trend" id="hum-trend">&nbsp;</div>
+    </div>
+
+    <!-- Comfort -->
+    <div class="card">
+      <div class="card-label">Comfort Index</div>
+      <div class="comfort-badge" id="comfort-badge">---</div>
+      <div class="comfort-desc" id="comfort-desc">Αναμένω δεδομένα...</div>
+      <div class="stat-row">
+        <div class="stat">Μηνύματα: <span id="msg-count">0</span></div>
+        <div class="stat">Τελευταίο: <span id="last-time">—</span></div>
+        <div class="stat">Ηλικία: <span id="data-age">—</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Servo dial (digital twin) + Session summary -->
+  <div class="grid-2">
+    <div class="card" id="servo-card">
+      <div class="card-label">Servo — Δείκτης Θερμοκρασίας</div>
+      <div class="servo-wrap">
+        <svg viewBox="0 0 200 112" width="100%" style="max-width:240px" aria-hidden="true">
+          <path id="servo-track" d="M 34 92 A 66 66 0 0 1 166 92" fill="none" stroke-width="10" stroke-linecap="round"/>
+          <path id="servo-arc"   d="M 34 92 A 66 66 0 0 1 166 92" fill="none" stroke-width="10" stroke-linecap="round" stroke-dasharray="0 999"/>
+          <line id="servo-needle" x1="100" y1="92" x2="34" y2="92" stroke-width="3" stroke-linecap="round"/>
+          <circle cx="100" cy="92" r="5" fill="var(--text)"/>
+          <text x="28"  y="107" fill="var(--muted)" font-size="9" font-family="Space Mono">10°C</text>
+          <text x="150" y="107" fill="var(--muted)" font-size="9" font-family="Space Mono">45°C</text>
+        </svg>
+        <div class="servo-deg"><span id="servo-deg">—</span></div>
+        <div class="servo-sub">Γωνία σερβο (όπως στο servo.py: 10–45°C → 0–180°)</div>
+      </div>
+    </div>
+
+    <div class="card" id="summary-card">
+      <div class="card-label">Σύνοψη Συνεδρίας</div>
+      <div class="sum-row-label">ΘΕΡΜΟΚΡΑΣΙΑ (°C)</div>
+      <div class="sum-grid">
+        <div class="sum-cell"><div class="sum-key">Min</div><div class="sum-val t" id="t-min">—</div></div>
+        <div class="sum-cell"><div class="sum-key">Μ.Ο.</div><div class="sum-val t" id="t-avg">—</div></div>
+        <div class="sum-cell"><div class="sum-key">Max</div><div class="sum-val t" id="t-max">—</div></div>
+      </div>
+      <div class="sum-row-label">ΥΓΡΑΣΙΑ (%)</div>
+      <div class="sum-grid">
+        <div class="sum-cell"><div class="sum-key">Min</div><div class="sum-val h" id="h-min">—</div></div>
+        <div class="sum-cell"><div class="sum-key">Μ.Ο.</div><div class="sum-val h" id="h-avg">—</div></div>
+        <div class="sum-cell"><div class="sum-key">Max</div><div class="sum-val h" id="h-max">—</div></div>
+      </div>
+      <button class="btn-ghost" onclick="resetStats()">Μηδενισμός συνεδρίας</button>
+    </div>
+  </div>
+
+  <!-- Chart -->
+  <div class="card chart-card">
+    <div class="card-label" id="chart-label">Ιστορικό (τελευταίες 60 μετρήσεις · ~10 λεπτά)</div>
+    <div class="chart-wrap">
+      <canvas id="myChart"></canvas>
+    </div>
+  </div>
+
+  <!-- AI Report -->
+  <div class="card" id="ai-card" style="margin-bottom:16px;border-left:3px solid var(--teal)">
+    <div class="card-label">🤖 AI Weather Report</div>
+    <div id="ai-report-text" style="font-size:14px;line-height:1.6;color:var(--muted);font-style:italic;margin-top:8px">Αναμένω AI report (κάθε 5 λεπτά)...</div>
+    <div id="ai-report-time" style="font-size:11px;color:var(--muted);margin-top:6px;font-family:var(--mono)"></div>
+  </div>
+
+  <!-- Log -->
+  <div class="card log-card">
+    <div class="card-label">Τελευταία Μηνύματα MQTT</div>
+    <div class="log-list" id="log-list">
+      <div class="log-entry"><span class="ts">—</span><span class="pl">Αναμένω σύνδεση...</span></div>
+    </div>
+  </div>
+
+  <!-- Config -->
+  <button class="config-toggle" onclick="toggleConfig()">
+    ⚙ Ρυθμίσεις Σύνδεσης
+    <span id="cfg-arrow">▼</span>
+  </button>
+  <div class="config-panel" id="config-panel">
+    <div class="config-grid">
+      <div class="config-field">
+        <label>MQTT Broker</label>
+        <input type="text" id="cfg-host" value="test.mosquitto.org">
+      </div>
+      <div class="config-field">
+        <label>Port (WS)</label>
+        <input type="text" id="cfg-port" value="8081">
+      </div>
+      <div class="config-field">
+        <label>Username</label>
+        <input type="text" id="cfg-user" value="">
+      </div>
+      <div class="config-field">
+        <label>Password</label>
+        <input type="password" id="cfg-pass" value="">
+      </div>
+      <div class="config-field">
+        <label>Topic</label>
+        <input type="text" id="cfg-topic" value="robotonio/giannis/weather">
+      </div>
+    </div>
+    <button class="btn-connect" onclick="connect()">Σύνδεση →</button>
+  </div>
+
+</main>
+
+<footer>ROBOTONIO IoT Sprint — MicroPython + Groq AI + MQTT | robotonio.gr</footer>
+
+<script>
+// ── State ────────────────────────────────────────────────────
+let client = null;
+let msgCount = 0;
+let tempHistory = [];
+let humHistory  = [];
+let labels      = [];
+const MAX_POINTS = 60;          // 60 σημεία × 10s ≈ 10 λεπτά ιστορικού
+const STALE_MS   = 25000;       // ο Pico στέλνει κάθε 10s → >25s θεωρείται «παλιό»
+let lastDataTs   = 0;
+
+// Σύνοψη συνεδρίας
+let stats = { tMin:null, tMax:null, tSum:0, hMin:null, hMax:null, hSum:0, n:0 };
+
+// ── Comfort logic (mirrors rgb.py) ─────────────────────────
+function comfortIndex(T, H) {
+  if (T < 18)             return { label: "KRYO",     desc: "Κρύο — ντύσου ζεστά!",          key: "cold"  };
+  if (T > 37)             return { label: "ΚΑΥΣΩΝΑΣ", desc: "Ακραία ζέστη — μείνε σπίτι!",   key: "heat"  };
+  if (T >= 33 || H > 80)  return { label: "ΑΠΟΠΝΙΚΤ", desc: "Αποπνικτικός καιρός",            key: "muggy" };
+  if (T >= 27 || H > 65)  return { label: "ΖΕΣΤΟ",    desc: "Ζεστό — πρόσεχε την ενυδάτωση",  key: "warm"  };
+  return                         { label: "ΑΝΕΤΑ",    desc: "Άνετος καιρός!",                 key: "comfy" };
+}
+
+// ── Theme ────────────────────────────────────────────────────
+function applyChartTheme() {
+  const cs   = getComputedStyle(document.documentElement);
+  const grid = cs.getPropertyValue('--chart-grid').trim();
+  const mut  = cs.getPropertyValue('--muted').trim();
+  const teal = cs.getPropertyValue('--teal').trim();
+  const blue = cs.getPropertyValue('--blue').trim();
+
+  chart.options.plugins.legend.labels.color = mut;
+  chart.options.scales.x.ticks.color  = mut;
+  chart.options.scales.x.grid.color   = grid;
+  chart.options.scales.yT.ticks.color = teal;
+  chart.options.scales.yT.grid.color  = grid;
+  chart.options.scales.yH.ticks.color = blue;
+
+  chart.data.datasets[0].borderColor = teal;
+  chart.data.datasets[0].pointBackgroundColor = teal;
+  chart.data.datasets[1].borderColor = blue;
+  chart.data.datasets[1].pointBackgroundColor = blue;
+  chart.update('none');
+}
+
+function setTheme(t) {
+  document.documentElement.setAttribute('data-theme', t);
+  document.getElementById('theme-toggle').textContent = (t === 'light') ? '☀️' : '🌙';
+  try { localStorage.setItem('robotonio-theme', t); } catch (e) {}
+  applyChartTheme();
+}
+
+function toggleTheme() {
+  const cur = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+  setTheme(cur === 'light' ? 'dark' : 'light');
+}
+
+// ── Chart ────────────────────────────────────────────────────
+const ctx = document.getElementById('myChart').getContext('2d');
+const chart = new Chart(ctx, {
+  type: 'line',
+  data: {
+    labels: [],
+    datasets: [
+      {
+        label: 'Θερμοκρασία (°C)',
+        data: [],
+        borderColor: '#00d4aa',
+        backgroundColor: 'rgba(0,212,170,0.06)',
+        borderWidth: 2,
+        pointRadius: 2,
+        pointBackgroundColor: '#00d4aa',
+        tension: 0.4,
+        fill: true,
+        yAxisID: 'yT',
+      },
+      {
+        label: 'Υγρασία (%)',
+        data: [],
+        borderColor: '#4a9eff',
+        backgroundColor: 'rgba(74,158,255,0.06)',
+        borderWidth: 2,
+        pointRadius: 2,
+        pointBackgroundColor: '#4a9eff',
+        tension: 0.4,
+        fill: true,
+        yAxisID: 'yH',
+      }
+    ]
+  },
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: { duration: 400 },
+    interaction: { mode: 'index', intersect: false },
+    plugins: {
+      legend: {
+        labels: { color: '#7a8aa0', font: { family: 'Space Mono', size: 11 }, boxWidth: 12, padding: 16 }
+      }
+    },
+    scales: {
+      x: {
+        ticks: { color: '#7a8aa0', font: { family: 'Space Mono', size: 10 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 8 },
+        grid:  { color: 'rgba(255,255,255,0.04)' }
+      },
+      yT: {
+        position: 'left',
+        ticks: { color: '#00d4aa', font: { family: 'Space Mono', size: 11 }, callback: v => v.toFixed(1) + '°' },
+        grid:  { color: 'rgba(255,255,255,0.04)' }
+      },
+      yH: {
+        position: 'right',
+        ticks: { color: '#4a9eff', font: { family: 'Space Mono', size: 11 }, callback: v => v.toFixed(0) + '%' },
+        grid:  { display: false }
+      }
+    }
+  }
+});
+
+// ── MQTT ─────────────────────────────────────────────────────
+function connect() {
+  if (client) { try { client.end(true); } catch(e){} }
+
+  const host  = document.getElementById('cfg-host').value.trim();
+  const port  = document.getElementById('cfg-port').value.trim();
+  const user  = document.getElementById('cfg-user').value.trim();
+  const pass  = document.getElementById('cfg-pass').value.trim();
+  const topic = document.getElementById('cfg-topic').value.trim();
+
+  setStatus('connecting');
+
+  // ws:// για test.mosquitto.org (port 8080), wss:// για HiveMQ (port 8884) ή mosquitto wss (8081)
+  const protocol = port === '8080' ? 'ws' : 'wss';
+  const url = `${protocol}://${host}:${port}/mqtt`;
+
+  const opts = {
+    clientId: 'robotonio_dash_' + Math.random().toString(16).substr(2, 8),
+    keepalive: 60,
+    reconnectPeriod: 5000,
+    connectTimeout: 10000,
+  };
+  if (user) { opts.username = user; opts.password = pass; }
+
+  client = mqtt.connect(url, opts);
+
+  client.on('connect', () => {
+    setStatus('connected');
+    client.subscribe(topic);
+    const aiTopic = topic.replace('/weather', '/ai_report');
+    client.subscribe(aiTopic);
+    addLog('✓ Συνδέθηκε · subscribe: ' + topic, true);
+  });
+
+  client.on('message', (t, payload) => {
+    const txt = payload.toString();
+    if (t.toString().includes('ai_report')) {
+      addLog('🤖 ' + txt, true);
+      showAiReport(txt);
+    } else {
+      try {
+        const data = JSON.parse(txt);
+        handleData(data);
+      } catch(e) {
+        addLog('Parse error: ' + txt);
+      }
+    }
+  });
+
+  client.on('error', (err) => {
+    setStatus('error');
+    addLog('✗ Σφάλμα: ' + err.message);
+  });
+
+  client.on('close', () => {
+    setStatus('disconnected');
+  });
+}
+
+function handleData(data) {
+  msgCount++;
+  lastDataTs = Date.now();
+  const T = parseFloat(data.temp ?? data.temperature);
+  const H = parseFloat(data.hum  ?? data.humidity);
+  if (isNaN(T) || isNaN(H)) return;
+
+  // Cards
+  const prevT = parseFloat(document.getElementById('temp-val').textContent);
+  const prevH = parseFloat(document.getElementById('hum-val').textContent);
+
+  document.getElementById('temp-val').textContent = T.toFixed(1);
+  document.getElementById('hum-val').textContent  = H.toFixed(1);
+
+  if (!isNaN(prevT)) {
+    const dt = T - prevT;
+    document.getElementById('temp-trend').textContent = (dt > 0 ? '▲ +' : dt < 0 ? '▼ ' : '→ ') + Math.abs(dt).toFixed(1) + '°C από τελ.';
+  }
+  if (!isNaN(prevH)) {
+    const dh = H - prevH;
+    document.getElementById('hum-trend').textContent = (dh > 0 ? '▲ +' : dh < 0 ? '▼ ' : '→ ') + Math.abs(dh).toFixed(1) + '% από τελ.';
+  }
+
+  // Comfort → χρώμα μέσω data-state (θεμα-aware)
+  const c = comfortIndex(T, H);
+  document.getElementById('comfort-badge').textContent = c.label;
+  document.getElementById('comfort-badge').dataset.state = c.key;
+  document.getElementById('comfort-desc').textContent = c.desc;
+  document.getElementById('temp-val').dataset.state = c.key;
+  document.getElementById('servo-card').dataset.state = c.key;
+
+  // Servo digital twin
+  updateServo(T);
+
+  // Session stats
+  updateStats(T, H);
+
+  // Stats row
+  document.getElementById('msg-count').textContent = msgCount;
+  const now = new Date();
+  const timeLabel = pad(now.getHours()) + ':' + pad(now.getMinutes()) + ':' + pad(now.getSeconds());
+  document.getElementById('last-time').textContent = timeLabel;
+  updateFreshness();
+
+  // Chart
+  labels.push(timeLabel);
+  tempHistory.push(T);
+  humHistory.push(H);
+  if (labels.length > MAX_POINTS) { labels.shift(); tempHistory.shift(); humHistory.shift(); }
+  chart.data.labels           = labels;
+  chart.data.datasets[0].data = tempHistory;
+  chart.data.datasets[1].data = humHistory;
+  chart.update();
+
+  // Log
+  const line = `T=${T.toFixed(1)}°C  H=${H.toFixed(1)}%` + (data.id ? `  #${data.id}` : '');
+  addLog(line);
+}
+
+// ── Servo gauge ──────────────────────────────────────────────
+function updateServo(T) {
+  const ratio = Math.max(0, Math.min(1, (T - 10) / (45 - 10)));
+  const angle = ratio * 180;                          // 0–180° όπως στο servo.py
+  document.getElementById('servo-deg').textContent = Math.round(angle) + '°';
+
+  // γέμισμα τόξου (μήκος ημικυκλίου r=66 ≈ 207.3)
+  const arcLen = Math.PI * 66;
+  document.getElementById('servo-arc').setAttribute('stroke-dasharray', (ratio * arcLen).toFixed(1) + ' 999');
+
+  // βελόνα: 180° (αριστερά, =10°C) → 0° (δεξιά, =45°C)
+  const rad = (180 - angle) * Math.PI / 180;
+  const cx = 100, cy = 92, r = 66;
+  const x = cx + r * Math.cos(rad);
+  const y = cy - r * Math.sin(rad);
+  const needle = document.getElementById('servo-needle');
+  needle.setAttribute('x2', x.toFixed(1));
+  needle.setAttribute('y2', y.toFixed(1));
+}
+
+// ── Session summary ──────────────────────────────────────────
+function updateStats(T, H) {
+  stats.n++;
+  stats.tSum += T; stats.hSum += H;
+  stats.tMin = stats.tMin === null ? T : Math.min(stats.tMin, T);
+  stats.tMax = stats.tMax === null ? T : Math.max(stats.tMax, T);
+  stats.hMin = stats.hMin === null ? H : Math.min(stats.hMin, H);
+  stats.hMax = stats.hMax === null ? H : Math.max(stats.hMax, H);
+
+  document.getElementById('t-min').textContent = stats.tMin.toFixed(1) + '°';
+  document.getElementById('t-max').textContent = stats.tMax.toFixed(1) + '°';
+  document.getElementById('t-avg').textContent = (stats.tSum / stats.n).toFixed(1) + '°';
+  document.getElementById('h-min').textContent = stats.hMin.toFixed(0) + '%';
+  document.getElementById('h-max').textContent = stats.hMax.toFixed(0) + '%';
+  document.getElementById('h-avg').textContent = (stats.hSum / stats.n).toFixed(0) + '%';
+}
+
+function resetStats() {
+  stats = { tMin:null, tMax:null, tSum:0, hMin:null, hMax:null, hSum:0, n:0 };
+  ['t-min','t-max','t-avg','h-min','h-max','h-avg'].forEach(id => document.getElementById(id).textContent = '—');
+  msgCount = 0;
+  document.getElementById('msg-count').textContent = '0';
+  labels = []; tempHistory = []; humHistory = [];
+  chart.data.labels = []; chart.data.datasets[0].data = []; chart.data.datasets[1].data = [];
+  chart.update();
+}
+
+// ── Freshness / stale-data ───────────────────────────────────
+function updateFreshness() {
+  const ageEl = document.getElementById('data-age');
+  if (!lastDataTs) { ageEl.textContent = '—'; return; }
+  const age = Math.round((Date.now() - lastDataTs) / 1000);
+  ageEl.textContent = 'πριν ' + age + 's';
+
+  if (client && client.connected) {
+    const dot  = document.getElementById('dot');
+    const text = document.getElementById('status-text');
+    if (age * 1000 > STALE_MS) {
+      dot.className = 'dot stale';
+      text.textContent = 'Καθυστέρηση δεδομένων';
+    } else {
+      dot.className = 'dot connected';
+      text.textContent = 'Συνδεδεμένο';
+    }
+  }
+}
+setInterval(updateFreshness, 1000);
+
+// ── Helpers / UI ─────────────────────────────────────────────
+function pad(n) { return n.toString().padStart(2, '0'); }
+
+function addLog(msg, system = false) {
+  const list = document.getElementById('log-list');
+  const now  = new Date();
+  const ts   = pad(now.getHours()) + ':' + pad(now.getMinutes()) + ':' + pad(now.getSeconds());
+  const el = document.createElement('div');
+  el.className = 'log-entry';
+  el.innerHTML = `<span class="ts">${ts}</span><span class="pl" style="${system ? 'color:var(--teal)' : ''}">${msg}</span>`;
+  list.insertBefore(el, list.firstChild);
+  while (list.children.length > 8) list.removeChild(list.lastChild);
+}
+
+function setStatus(s) {
+  const dot  = document.getElementById('dot');
+  const text = document.getElementById('status-text');
+  dot.className = 'dot';
+  if (s === 'connected')       { dot.classList.add('connected'); text.textContent = 'Συνδεδεμένο'; }
+  else if (s === 'error')      { dot.classList.add('error');     text.textContent = 'Σφάλμα'; }
+  else if (s === 'connecting') { text.textContent = 'Σύνδεση...'; }
+  else                         { text.textContent = 'Αποσυνδεδεμένο'; }
+}
+
+function showAiReport(text) {
+  const el = document.getElementById('ai-report-text');
+  const ts = document.getElementById('ai-report-time');
+  el.textContent = text;
+  el.style.color = 'var(--text)';
+  const now = new Date();
+  ts.textContent = pad(now.getHours()) + ':' + pad(now.getMinutes()) + ':' + pad(now.getSeconds());
+}
+
+function toggleConfig() {
+  const panel = document.getElementById('config-panel');
+  const arrow = document.getElementById('cfg-arrow');
+  panel.classList.toggle('open');
+  arrow.textContent = panel.classList.contains('open') ? '▲' : '▼';
+}
+
+// Init θέματος (συγχρονισμός εικονιδίου + chart) και auto-connect
+window.addEventListener('load', () => {
+  const t = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+  setTheme(t);
+  connect();
+});
+</script>
+</body>
+</html>
